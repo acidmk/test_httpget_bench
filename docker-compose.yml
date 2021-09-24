@@ -1,0 +1,22 @@
+version: '3'
+
+networks:
+  app-network:
+    driver: bridge
+
+services:
+  test-bench:
+    hostname: test-bench
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    ports:
+      - '8081:8081'
+    networks:
+      - app-network
+    environment:
+      PORT: 8081
+      CONCURRENCY: 50000
+      REQUESTS_PER_HOST: 200
+      REQUEST_TIMEOUT: 3
+      USE_COMPRESSION: 'true'
