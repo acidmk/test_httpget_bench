@@ -1,10 +1,7 @@
 package benchmarks
 
 import (
-	"crypto/tls"
-	"net/http"
-	"test-bench/config"
-	"time"
+	"net"
 )
 
 type Result struct {
@@ -13,27 +10,12 @@ type Result struct {
 }
 
 type HTTPWorker struct {
-	client  *http.Client
-	jobs    chan *http.Request
+	jobs    chan *RequestItem
 	results chan *Result
 }
 
-func NewHTTPWorker(conf *config.Config, jobs chan *http.Request, results chan *Result) *HTTPWorker {
-	tlsconfig := &tls.Config{
-		InsecureSkipVerify: true,
-	}
-
-	transport := &http.Transport{
-		DisableCompression: conf.UseCompression,
-		DisableKeepAlives:  true,
-		TLSClientConfig:    tlsconfig,
-	}
-
+func NewHTTPWorker(jobs chan *RequestItem, results chan *Result) *HTTPWorker {
 	return &HTTPWorker{
-		&http.Client{
-			Transport: transport,
-			Timeout:   time.Duration(conf.RequestTimeout) * time.Second,
-		},
 		jobs,
 		results,
 	}
@@ -41,18 +23,24 @@ func NewHTTPWorker(conf *config.Config, jobs chan *http.Request, results chan *R
 
 func (h *HTTPWorker) Run() {
 	for job := range h.jobs {
-		result := <-h.doRequest(job)
-		h.results <- result
+		select {
+		case result := <-h.doRequest(job):
+			h.results <- result
+		}
 	}
 }
 
-func (h *HTTPWorker) doRequest(request *http.Request) chan *Result {
+func (h *HTTPWorker) doRequest(request *RequestItem) chan *Result {
 	ch := make(chan *Result, 1)
 	go func() {
-		if r, err := h.client.Do(request); err != nil || r.StatusCode != http.StatusOK {
-			ch <- &Result{request.Host, false}
+		conn, err := net.DialTimeout("tcp", request.Ip.String()+":https", request.Timeout)
+		if err != nil {
+			h.results <- &Result{request.Host, false}
+			return
 		}
-		ch <- &Result{request.Host, true}
+		h.results <- &Result{request.Host, true}
+
+		conn.Close()
 	}()
 
 	return ch

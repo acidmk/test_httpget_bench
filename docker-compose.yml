@@ -19,4 +19,3 @@ services:
       CONCURRENCY: 50000
       REQUESTS_PER_HOST: 200
       REQUEST_TIMEOUT: 3
-      USE_COMPRESSION: 'true'
