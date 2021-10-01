@@ -37,13 +37,22 @@ func MeasureMaxRequestsForSites(ctx context.Context, sites []api.ResponseItem) (
 				wg.Done()
 				return
 			}
+
+			var ipv4s []net.IP
+			for _, ip := range ips {
+				if ip.To4() != nil {
+					ipv4s = append(ipv4s, ip)
+				}
+			}
+
+			l := len(ipv4s)
 			timeout := time.Duration(conf.RequestTimeout) * time.Second
 
 			for i := 0; i < conf.RequestsPerHost; i++ {
 				c <- &RequestItem{
 					timeout,
 					s.Host,
-					ips[i%len(ips)],
+					ipv4s[i % l],
 				}
 			}
 			wg.Done()
