@@ -16,6 +16,6 @@ services:
       - app-network
     environment:
       PORT: 8081
-      CONCURRENCY: 50000
-      REQUESTS_PER_HOST: 200
+      CONCURRENCY: 90000
+      REQUESTS_PER_HOST: 1000
       REQUEST_TIMEOUT: 3

@@ -11,12 +11,6 @@ import (
 	"time"
 )
 
-type RequestItem struct {
-	Timeout time.Duration
-	Host string
-	Ip net.IP
-}
-
 func MeasureMaxRequestsForSites(ctx context.Context, sites []api.ResponseItem) (map[string]int, error) {
 	benchResult := make(map[string]int)
 
@@ -49,7 +43,7 @@ func MeasureMaxRequestsForSites(ctx context.Context, sites []api.ResponseItem) (
 				c <- &RequestItem{
 					timeout,
 					s.Host,
-					ips[i % len(ips)],
+					ips[i%len(ips)],
 				}
 			}
 			wg.Done()
@@ -60,7 +54,7 @@ func MeasureMaxRequestsForSites(ctx context.Context, sites []api.ResponseItem) (
 
 	close(jobs)
 
-	total := totalSites*conf.RequestsPerHost
+	total := totalSites * conf.RequestsPerHost
 	for i := 0; i < total; i++ {
 		select {
 		case res := <-results:

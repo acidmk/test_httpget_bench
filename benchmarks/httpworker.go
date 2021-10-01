@@ -2,7 +2,14 @@ package benchmarks
 
 import (
 	"net"
+	"time"
 )
+
+type RequestItem struct {
+	Timeout time.Duration
+	Host    string
+	Ip      net.IP
+}
 
 type Result struct {
 	host  string
