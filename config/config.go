@@ -7,10 +7,12 @@ import (
 )
 
 type Config struct {
-	Port            int `mapstructure:"PORT"`
-	Concurrency     int `mapstructure:"CONCURRENCY"`
-	RequestsPerHost int `mapstructure:"REQUESTS_PER_HOST"`
-	RequestTimeout  int `mapstructure:"REQUEST_TIMEOUT"`
+	Port            int  `mapstructure:"PORT"`
+	Concurrency     int  `mapstructure:"CONCURRENCY"`
+	RequestsPerHost int  `mapstructure:"REQUESTS_PER_HOST"`
+	RequestTimeout  int  `mapstructure:"REQUEST_TIMEOUT"`
+	UseHttpGet      bool `mapstructure:"USE_HTTP_GET"`
+	ChunkSize       int  `mapstructure:"CHUNK_SIZE"`
 }
 
 var (
@@ -43,6 +45,8 @@ func loadConfig() (*Config, error) {
 	viper.SetDefault("Concurrency", 50000)
 	viper.SetDefault("RequestsPerHost", 200)
 	viper.SetDefault("RequestTimeout", 3)
+	viper.SetDefault("UserHttpGet", true)
+	viper.SetDefault("ChunkSize", 20)
 
 	viper.SetConfigFile(".env")
 	viper.SetConfigType("env")

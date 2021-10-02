@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 	"test-bench/api"
+	"test-bench/cert"
 	"test-bench/config"
 	"time"
 )
@@ -16,64 +17,81 @@ func MeasureMaxRequestsForSites(ctx context.Context, sites []api.ResponseItem) (
 
 	conf := config.GetConfig()
 
-	jobs := make(chan *RequestItem, conf.Concurrency)
+	jobs := make(chan *RequestItem, conf.RequestsPerHost*len(sites))
 	results := make(chan *Result, conf.RequestsPerHost*len(sites))
+	stop := make(chan struct{})
 
+	tlsConf, err := cert.NewTLSConfig()
+	if err != nil {
+		return map[string]int{}, err
+	}
 	for i := 0; i < conf.Concurrency; i++ {
-		go NewHTTPWorker(jobs, results).Run()
+		go NewHTTPWorker(stop, tlsConf.Clone(), jobs, results).Run()
 	}
 
 	var wg sync.WaitGroup
-	totalSites := len(sites)
+	var rWg sync.WaitGroup
 
-	for _, site := range sites {
-		wg.Add(1)
-		benchResult[site.Host] = 0
-		go func(wg *sync.WaitGroup, s api.ResponseItem, c chan<- *RequestItem) {
-			ips, err := net.LookupIP(s.Host)
-			if err != nil {
-				fmt.Println(err)
-				totalSites--
-				wg.Done()
-				return
-			}
+	var chunks [][]api.ResponseItem
+	chunkSize := len(sites) / 4
+	for i := 0; i < len(sites); i += chunkSize {
+		end := i + chunkSize
 
-			var ipv4s []net.IP
-			for _, ip := range ips {
-				if ip.To4() != nil {
-					ipv4s = append(ipv4s, ip)
-				}
-			}
+		if end > len(sites) {
+			end = len(sites)
+		}
 
-			l := len(ipv4s)
-			timeout := time.Duration(conf.RequestTimeout) * time.Second
-
-			for i := 0; i < conf.RequestsPerHost; i++ {
-				c <- &RequestItem{
-					timeout,
-					s.Host,
-					ipv4s[i % l],
-				}
-			}
-			wg.Done()
-		}(&wg, site, jobs)
+		chunks = append(chunks, sites[i:end])
 	}
 
-	wg.Wait()
+	fmt.Printf("Total chunks to process %d\n", len(chunks))
+
+	for idx, chunk := range chunks {
+		totalSites := len(chunk)
+		now := time.Now()
+		for _, site := range chunk {
+			wg.Add(1)
+
+			benchResult[site.Host] = 0
+			go func(wg *sync.WaitGroup, rWg *sync.WaitGroup, s api.ResponseItem, c chan<- *RequestItem) {
+				_, err := net.LookupIP(s.Host)
+				if err != nil {
+					fmt.Println(err)
+					totalSites--
+					wg.Done()
+					return
+				}
+
+				for i := 0; i < conf.RequestsPerHost; i++ {
+					c <- &RequestItem{
+						s,
+					}
+				}
+				wg.Done()
+			}(&wg, &rWg, site, jobs)
+		}
+
+		wg.Wait()
+
+		time.Since(now).Seconds()
+
+		total := totalSites * conf.RequestsPerHost
+		for i := 0; i < total; i++ {
+			select {
+			case res := <-results:
+				if res.value {
+					benchResult[res.host]++
+				}
+			case <-ctx.Done():
+				return map[string]int{}, errors.New("context deadline exceeded")
+			}
+		}
+
+		fmt.Printf("chunk %d processed after %f seconds\n", idx+1, time.Since(now).Seconds())
+	}
 
 	close(jobs)
-
-	total := totalSites * conf.RequestsPerHost
-	for i := 0; i < total; i++ {
-		select {
-		case res := <-results:
-			if res.value {
-				benchResult[res.host]++
-			}
-		case <-ctx.Done():
-			return map[string]int{}, errors.New("context deadline exceeded")
-		}
-	}
+	stop <- struct{}{}
 
 	return benchResult, nil
 }
