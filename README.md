@@ -14,6 +14,8 @@ Set environment in `docker-compose` and run `docker-compose up -d` command to bu
 - `REQUESTS_PER_HOST:` The number of requests that will run against host
 - `REQUEST_TIMEOUT:` The time before request is cancelled
 - `USE_COMPRESSION:` Request the use of http gzip compression
+- `USE_HTTP_GET:` Use http get. Raw requests otherwise
+- `CHUNK_SIZE:` The size of processing chunk
 
 ### Service API
 
