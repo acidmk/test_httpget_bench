@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -88,10 +90,14 @@ func (h *HTTPWorker) doRequest(request *RequestItem) chan *Result {
 				return
 			}
 			defer res.Body.Close()
+			io.Copy(ioutil.Discard, res.Body)
 
 			ch <- &Result{request.Site.Host, true}
 			return
 		}
+
+		// Use dial with raw queries
+		// TODO: cache conn and handle redirects
 
 		// in case www is cut from the host
 		u, _ := url.Parse(request.Site.Url)
@@ -100,7 +106,6 @@ func (h *HTTPWorker) doRequest(request *RequestItem) chan *Result {
 		defer cancel()
 		port := 443
 		if strings.Contains(request.Site.Url, "http://") {
-			fmt.Println("http site "+request.Site.Host)
 			port = 80
 		}
 		conn, err := h.dialer.DialContext(ctx, "tcp", net.JoinHostPort(u.Host, strconv.Itoa(port)))
@@ -115,7 +120,6 @@ func (h *HTTPWorker) doRequest(request *RequestItem) chan *Result {
 			"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n"+
 			"User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:89.0) Gecko/20100101 Firefox/89.0\r\n"+
 			"Accept-Encoding: gzip, deflate, br\r\n"+
-			"Connection: close\r\n"+
 			"\r\n\r\n",
 			u.RequestURI(),
 			u.Hostname(),

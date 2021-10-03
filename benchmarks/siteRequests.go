@@ -10,75 +10,114 @@ import (
 	"time"
 )
 
-func MeasureMaxRequestsForSites(ctx context.Context, sites []api.ResponseItem) (map[string]int, error) {
-	benchResult := make(map[string]int)
+type SitesBench struct {
+	wg      *sync.WaitGroup
+	sites   []api.ResponseItem
+	jobs    chan *RequestItem
+	results chan *Result
+}
 
+func NewSitesBench(sites []api.ResponseItem) (*SitesBench, error) {
 	conf := config.GetConfig()
 
-	jobs := make(chan *RequestItem, conf.RequestsPerHost*len(sites))
-	results := make(chan *Result, conf.RequestsPerHost*len(sites))
+	bench := &SitesBench{
+		new(sync.WaitGroup),
+		sites,
+		make(chan *RequestItem, conf.RequestsPerHost*len(sites)),
+		make(chan *Result, conf.RequestsPerHost*len(sites)),
+	}
 
 	tlsConf, err := cert.NewTLSConfig()
 	if err != nil {
-		return map[string]int{}, err
+		return &SitesBench{}, err
 	}
-	var wg sync.WaitGroup
 
 	client := NewHttpClient(tlsConf.Clone())
 
 	for i := 0; i < conf.Concurrency; i++ {
-		go NewHTTPWorker(&wg, client, tlsConf.Clone(), jobs, results).Run()
+		go NewHTTPWorker(bench.wg, client, tlsConf.Clone(), bench.jobs, bench.results).Run()
 	}
 
-	var chunks [][]api.ResponseItem
-	chunkSize := conf.ChunkSize
-	for i := 0; i < len(sites); i += chunkSize {
-		end := i + chunkSize
+	return bench, nil
+}
 
-		if end > len(sites) {
-			end = len(sites)
+func (s *SitesBench) Close() {
+	close(s.jobs)
+	close(s.results)
+}
+
+func (s *SitesBench) Run(ctx context.Context) (map[string]int, error) {
+	benchResult := make(map[string]int)
+
+	conf := config.GetConfig()
+
+	var chunks [][]api.ResponseItem
+	for i := 0; i < len(s.sites); i += conf.ChunkSize {
+		end := i + conf.ChunkSize
+
+		if end > len(s.sites) {
+			end = len(s.sites)
 		}
 
-		chunks = append(chunks, sites[i:end])
+		chunks = append(chunks, s.sites[i:end])
 	}
 
 	fmt.Printf("Total chunks to process %d\n", len(chunks))
 
+	// Precache connections
+	if err := s.processChunk(ctx, s.sites, 1, benchResult); err != nil {
+		return map[string]int{}, err
+	}
+
+	// Process sites in chunks
 	for idx, chunk := range chunks {
-		totalSites := len(chunk)
 		now := time.Now()
-		for _, site := range chunk {
-			wg.Add(1)
-
-			benchResult[site.Host] = 0
-			go func(wg *sync.WaitGroup, s api.ResponseItem, c chan<- *RequestItem) {
-				for i := 0; i < conf.RequestsPerHost; i++ {
-					c <- &RequestItem{
-						s,
-					}
-				}
-				wg.Done()
-			}(&wg, site, jobs)
+		if err := s.processChunk(ctx, chunk, conf.RequestsPerHost, benchResult); err != nil {
+			break
 		}
-
-		wg.Wait()
-
-		total := totalSites * conf.RequestsPerHost
-		for i := 0; i < total; i++ {
-			select {
-			case res := <-results:
-				if res.value {
-					benchResult[res.host]++
-				}
-			case <-ctx.Done():
-				return benchResult, nil
-			}
-		}
-
 		fmt.Printf("chunk %d processed after %f seconds\n", idx+1, time.Since(now).Seconds())
 	}
 
-	close(jobs)
-
 	return benchResult, nil
+}
+
+func (s *SitesBench) processChunk(
+	ctx context.Context,
+	sites []api.ResponseItem,
+	requests int,
+	benchResult map[string]int,
+) error {
+	totalSites := len(sites)
+	for _, site := range sites {
+		s.wg.Add(1)
+
+		_, ok := benchResult[site.Host]
+		if !ok {
+			benchResult[site.Host] = 0
+		}
+
+		go func(wg *sync.WaitGroup, s api.ResponseItem, c chan<- *RequestItem) {
+			for i := 0; i < requests; i++ {
+				c <- &RequestItem{
+					s,
+				}
+			}
+			wg.Done()
+		}(s.wg, site, s.jobs)
+	}
+	s.wg.Wait()
+
+	total := totalSites * requests
+	for i := 0; i < total; i++ {
+		select {
+		case res := <-s.results:
+			if res.value {
+				benchResult[res.host]++
+			}
+		case <-ctx.Done():
+			return fmt.Errorf("context deadline exeeded")
+		}
+	}
+
+	return nil
 }

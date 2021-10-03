@@ -32,7 +32,16 @@ func GetSites(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sites, err := benchmarks.MeasureMaxRequestsForSites(ctx, res)
+	bench, err := benchmarks.NewSitesBench(res)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": fmt.Sprintf("failed to benchmark search results: %s", err),
+		})
+		return
+	}
+	defer bench.Close()
+
+	sites, err := bench.Run(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message": fmt.Sprintf("failed to benchmark search results: %s", err),
